@@ -5,8 +5,10 @@ const port = 3000;
 const db = "tna";
 const db_table = "camera";
 const bodyParser = require('body-parser')
+const cors = require("cors");
 
-
+app.use(express.json())
+app.use(cors());
 
 
 const connection = mysql.createConnection({
@@ -21,9 +23,138 @@ app.listen(port, () => {
 });
 
 
+app.post("/register", async(req, res) => {
+  const username = req.body.username
+  const email = req.body.email
+  const password = req.body.password
+  const repassword = req.body.cpass
+  const bcrypt = require('bcryptjs');
+  const salt = bcrypt.genSaltSync(10);
+  const encrypt = await bcrypt.hash(password, salt)
 
-app.use(bodyParser.json({limit:1024*1024*20, type:'application/json'}));
-app.use(bodyParser.urlencoded({extended:true,limit:1024*1024*20,type:'application/x-www-form-urlencoding' }));
+  const query = "SELECT * from users where email=? AND username=?";
+  const params = [email, username]
+  connection.query(query, params, (err, rows) => {
+      if (err) throw err;
+      //
+      var output = {}
+      if (username === "" || email === "" || password === "") {
+          output["message"] = "Please fill up the necessary informations needed";
+      } else if (password !== repassword) {
+          output["message"] = "Password does not match";
+      } else {
+          if (rows.length !== 0) {
+              console.log('User already exists')
+              output["message"] = "User already exists";
+          } else {
+              console.log('Successfully Registered')
+              output["message"] = "Successfully Registered";
+              connection.query(
+                  "INSERT INTO users (username, email, password) VALUES (?,?,?)", [username, email, encrypt],
+              );
+          }
+      }
+
+      res.json(output)
+
+  });
+
+});
+
+app.post("/signin", (request, response) => {
+  const user = request.body.username
+  const pass = request.body.password
+  console.log(user)
+  const query = "SELECT password from users where username=?";
+  const params = [user]
+  connection.query(query, params, (err, rows) => {
+
+      if (err) throw err;
+      //
+      var output = {}
+
+      if (rows.length !== 0) {
+          var password_hash = rows[0]["password"];
+          const bcrypt = require('bcryptjs');
+          const verified = bcrypt.compareSync(pass, password_hash);
+          if (verified) {
+              output["status"] = 1;
+              output["message"] = "Verified";
+              console.log('verified')
+          } else {
+              console.log('invalid credentials')
+              output["status"] = 0;
+              output["message"] = "Invalid password";
+          }
+
+      }else if (user === "" || pass === ""){
+        console.log('invalid')
+        output["message"] = "Please fill up the form";
+
+    }
+       else {
+          console.log('invalid')
+          output["message"] = "Invalid username and password";
+      }
+      response.json(output)
+
+  });
+})
+
+app.post("/resetpass", async(request, response) => {
+  const email = request.body.email
+  const newpass = request.body.newpass
+  const confirmpass = request.body.newpass1
+  const query = "SELECT password from users where email=?";
+  const params = [email]
+  const bcrypt = require('bcryptjs');
+  const salt = bcrypt.genSaltSync(10);
+  const encrypt = await bcrypt.hash(newpass, salt)
+  const queryc = "SELECT * from users where email=?";
+  
+  connection.query(queryc, params, (err, rows) => {
+      if (err) throw err;
+      //
+      var output = {}
+      if (rows.length !== 0) {
+          console.log('Email found')
+          connection.query(query, params, (err, rows) => {
+            if (err) throw err;
+            //
+            var output = {}
+            if (newpass !== confirmpass) {
+                output["message"] = "Password does not match";
+            } else if (newpass === "" || confirmpass === "") {
+                output["message"] = "Please fill up the necessary information needed";
+            } else {
+                if (rows.length !== 0) {
+                    connection.query(
+                        "UPDATE users SET password = ? WHERE email = ?;", [encrypt, email],
+                    );
+                    console.log('Successfully Reset Password')
+                    output["message"] = "Successfully Reset Password";
+      
+                }
+                 else {
+                    console.log('An Error Occured')
+                    output["message"] = "An Error Occured";
+                }
+            }
+            response.json(output)
+      
+        });
+
+      } else {
+          console.log('could not find email')
+          
+      }
+      
+
+  });
+})
+
+app.use(bodyParser.json({limit:'50mb',extended:true, type:'application/json'}));
+app.use(bodyParser.urlencoded({extended:true,limit:'50mb',type:'application/x-www-form-urlencoding' }));
  app.post('/capture', (req, res)=> {
   var {date_time, capture} = req.body;
   connection.query(`INSERT INTO ${db_table} (date_time, capture) VALUES (?, ?);`,
@@ -41,8 +172,7 @@ app.use(bodyParser.urlencoded({extended:true,limit:1024*1024*20,type:'applicatio
   })
  })
 
-
-app.get('/render-image', (req, res)=> {
+ app.get('/image', (req, res)=> {
   // Select the last entry from the db
   let list = [];
   connection.query(`SELECT * FROM ${db_table} ORDER BY id ASC;`,
